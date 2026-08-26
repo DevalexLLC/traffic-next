@@ -1,5 +1,13 @@
 # @devalexllc/traffic-next
 
+## 0.1.2
+
+### Patch Changes
+
+- 586db4a: Document the release process in the README: publishing now uses npm trusted
+  publishing rather than a stored token, and every release carries a provenance
+  attestation. No runtime changes.
+
 ## 0.1.1
 
 ### Patch Changes
