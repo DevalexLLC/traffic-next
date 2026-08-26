@@ -124,6 +124,22 @@ installs the hooks through the `prepare` script.
 Releases go out through the changesets action: merging the generated "Version
 Packages" PR is what publishes. Nothing reaches npm without that merge.
 
+Publishing uses [npm trusted publishing][tp] — the workflow exchanges a GitHub
+OIDC token for short-lived credentials, so there is no npm token stored in the
+repository. Every release carries a [provenance attestation][prov] linking the
+tarball to the commit and workflow that built it:
+
+```bash
+npm audit signatures            # verify provenance of an installed copy
+```
+
+Trusted publishing is configured against this repository and `release.yml` on
+npmjs.com. It depends on Node >= 24.20 (npm >= 11.19) on the runner, and on the
+npm-side organization name matching GitHub's canonical casing exactly.
+
+[tp]: https://docs.npmjs.com/trusted-publishers
+[prov]: https://docs.npmjs.com/generating-provenance-statements
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE). Copyright 2026 Devalex LLC.
