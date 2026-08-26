@@ -8,12 +8,16 @@
   publishing rather than a stored token, and every release carries a provenance
   attestation. No runtime changes.
 
-## 0.1.1
+## ~~0.1.1~~ (unpublished)
+
+Unpublished from npm on 2026-08-26 and never carried a runtime change; its
+`dist` output was identical to 0.1.0. The version number is retired — npm does
+not allow republishing an unpublished version — so nothing will occupy 0.1.1.
 
 ### Patch Changes
 
-- cb166cc: Publish with npm provenance. No runtime changes; `dist` output is identical
-  to 0.1.0.
+- ~~cb166cc: Publish with npm provenance. No runtime changes; `dist` output is
+  identical to 0.1.0.~~
 
 ## 0.1.0
 
