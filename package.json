@@ -1,6 +1,6 @@
 {
   "name": "@devalexllc/traffic-next",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "First-party user-activity tracking for Next.js App Router apps. Client queue plus a route-handler factory; the app supplies the session and the sink.",
   "keywords": [
     "analytics",
