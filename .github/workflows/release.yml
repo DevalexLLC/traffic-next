@@ -15,29 +15,41 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      # 24.20.0 bundles npm 11.19.0. The npm shipped with 24.13.0 (11.6.2)
+      # does not perform the OIDC token exchange — it fails ENEEDAUTH even
+      # with a valid ID token available and no competing .npmrc — so this is
+      # a floor that trusted publishing depends on, not a preference.
+      #
+      # No `registry-url`: it makes setup-node write an .npmrc pinning
+      # `_authToken` to a placeholder, which npm then sends instead of its
+      # OIDC credentials. npm defaults to registry.npmjs.org anyway.
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24.13.0
-          cache: npm
-          registry-url: https://registry.npmjs.org
+          node-version: 24.20.0
+          package-manager-cache: false
       - run: npm ci
 
       # Opens/updates a "Version Packages" PR while changesets are pending, and
       # publishes only once that PR is merged. Nothing reaches npm without a
       # human merging a version bump.
-      - uses: changesets/action@v1
+      #
+      # v2 is the line that tracks Changesets 3; v1 is maintenance only, and
+      # under it neither 0.1.0 nor 0.1.1 got a git tag or GitHub release
+      # despite `changeset publish` reporting tags created on the runner.
+      # v2 renames every input and adds `push-git-tags` (default true).
+      #
+      # No NPM_TOKEN: npm authenticates via OIDC (trusted publishing),
+      # configured on the package at npmjs.com against this repo and this
+      # workflow filename — the org must match GitHub's canonical casing
+      # (DevalexLLC), which npm compares case-sensitively. `id-token: write`
+      # above is what makes the exchange possible; `provenance: true` in
+      # publishConfig is what makes npm attach an attestation.
+      - uses: changesets/action@v2
         with:
-          publish: npm run release
-          version: npx changeset version
-          commit: "chore: version package"
-          title: "chore: version package"
-        # No NPM_TOKEN: npm authenticates via OIDC (trusted publishing),
-        # configured on the package at npmjs.com against this repo and this
-        # workflow filename. `id-token: write` above is what makes that
-        # possible; `provenance: true` in publishConfig is what makes npm
-        # attach an attestation.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          publish-script: npm run release
+          version-script: npx changeset version
+          commit-message: "chore: version package"
+          pr-title: "chore: version package"
