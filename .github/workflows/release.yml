@@ -34,7 +34,10 @@ jobs:
           version: npx changeset version
           commit: "chore: version package"
           title: "chore: version package"
+        # No NPM_TOKEN: npm authenticates via OIDC (trusted publishing),
+        # configured on the package at npmjs.com against this repo and this
+        # workflow filename. `id-token: write` above is what makes that
+        # possible; `provenance: true` in publishConfig is what makes npm
+        # attach an attestation.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
