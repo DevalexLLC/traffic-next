@@ -1,5 +1,12 @@
 # @devalexllc/traffic-next
 
+## 0.1.1
+
+### Patch Changes
+
+- cb166cc: Publish with npm provenance. No runtime changes; `dist` output is identical
+  to 0.1.0.
+
 ## 0.1.0
 
 ### Minor Changes
