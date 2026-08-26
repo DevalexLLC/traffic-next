@@ -1,0 +1,10 @@
+pre-commit:
+  jobs:
+    - name: oxfmt
+      run: npm exec oxfmt -- --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+
+pre-push:
+  jobs:
+    - name: oxlint
+      run: npm exec oxlint -- --type-aware --type-check

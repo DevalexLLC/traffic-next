@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "declaration": true,
+    "declarationMap": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    // Bundler, not NodeNext. Next 16 ships `next/navigation` and `next/server`
+    // as bare files with no matching `exports` entry, so Node-style ESM
+    // resolution cannot see them — Next mandates bundler resolution, and every
+    // consumer of this package is bundling with Next anyway.
+    //
+    // Relative imports still carry an explicit `.js` regardless. Bundler
+    // resolution does not require it, but it means the emitted ESM in `dist`
+    // is loadable by plain Node, which `npm run build` verification relies on.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": ["node"]
+  },
+  "include": ["src", "vitest.config.ts"]
+}
