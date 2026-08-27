@@ -71,7 +71,7 @@ export const trafficEventSchema = z.object({
   date: z.iso.datetime(),
   type: z.enum(TrafficType).default(TrafficType.Info),
   event: z.enum(TrafficEvent),
-  /** Path only, no origin, no query string. Normalised client-side. */
+  /** Path only, no origin, no query string. Normalized client-side. */
   uri: z.string().max(512),
   title: z.string().max(256).optional(),
   browser: z.string().max(128).optional(),

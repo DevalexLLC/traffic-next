@@ -17,7 +17,7 @@ vi.mock("next/server", () => ({
 
 const forward = vi.fn<(body: TrafficPayload) => Promise<void>>();
 
-function build(identity: TrafficIdentity = { username: "jdoe" }) {
+function build(identity: TrafficIdentity = { username: "JaneDoe" }) {
   return createTrafficRoute({
     application: "TestApp",
     staticState: { application_version: "1.2.3" },
@@ -68,7 +68,7 @@ describe("createTrafficRoute", () => {
   });
 
   it("403s an authenticated but unentitled caller", async () => {
-    const { POST } = build({ username: "jdoe", authorized: false });
+    const { POST } = build({ username: "JaneDoe", authorized: false });
     expect((await POST(request(batch()))).status).toBe(403);
     expect(forward).not.toHaveBeenCalled();
   });
@@ -101,7 +101,7 @@ describe("createTrafficRoute", () => {
     expect(response.status).toBe(204);
     expect(forward).toHaveBeenCalledTimes(1);
     const body = forwarded();
-    expect(body.username).toBe("jdoe");
+    expect(body.username).toBe("JaneDoe");
     expect(body.application).toBe("TestApp");
     // Left-most x-forwarded-for entry is the client; the rest are our proxies.
     expect(body.ip_address).toBe("203.0.113.7");

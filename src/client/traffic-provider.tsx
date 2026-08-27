@@ -97,7 +97,7 @@ export function TrafficProvider({
             retries.current = 0;
             return;
           }
-          // 401/403 mean the session is gone or unentitled. Retrying cannot fix
+          // 401/403 mean the session is gone or un-entitled. Retrying cannot fix
           // that and would hammer the auth path on every event; drop instead.
           if (response.status === 401 || response.status === 403) return;
           // 400 means we built something the schema rejects — a bug on this
@@ -130,7 +130,7 @@ export function TrafficProvider({
     (draft: EventDraft) => {
       queue.current.push({
         type: TrafficType.Info,
-        uri: normaliseUri(window.location.pathname),
+        uri: normalizeUri(window.location.pathname),
         ...draft,
         date: new Date().toISOString(),
         browser: navigator.userAgent.slice(0, 128),
@@ -200,7 +200,7 @@ function backoff(attempt: number): number {
  * with a few thousand leading slashes, and hanging the tab on a tracking call
  * would be an absurd way to lose a session.
  */
-function normaliseUri(pathname: string): string {
+function normalizeUri(pathname: string): string {
   let start = 0;
   let end = pathname.length;
 
