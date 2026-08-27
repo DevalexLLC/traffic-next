@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# Nothing here writes to the repo — the jobs check out, build, test and hand a
+# report to SonarQube. Declared rather than inherited so tightening or loosening
+# the repository default cannot silently change what this workflow can do.
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: verify (node ${{ matrix.node }})
