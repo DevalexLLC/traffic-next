@@ -44,3 +44,56 @@ jobs:
               if (!m.trafficEventSchema) throw new Error('root entry missing exports');
             });
           "
+
+  # A separate job, not a step in the matrix: the analysis is a property of the
+  # code, not of the Node version it ran under, and pushing the same project key
+  # twice from one workflow just makes the second scan overwrite the first.
+  sonar:
+    name: sonar
+    # Restricted to `main` on purpose. The instance is Community Edition with no branch plugin, so
+    # it has no concept of branches or pull requests: every analysis it receives is recorded as
+    # the project's main branch under the single key `Devalex:traffic-next`. Scanning any other
+    # ref therefore overwrites main's snapshot with unmerged code.
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Shallow clones hide the blame data SonarQube uses to attribute issues.
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          # Tracks the upper matrix entry; nothing here needs the 22.18 floor.
+          node-version: 24.20.0
+          cache: npm
+      - run: npm ci
+      - run: npm run test:coverage
+
+      # `sonar.projectVersion` must move for a New Code definition of "previous version" to have a
+      # baseline that ever advances — on `main`, `github.ref_name` is the literal string "main" on
+      # every analysis. The release tag is the version this repo actually publishes, so use it;
+      # the package version is the fallback for a checkout with no tags.
+      - name: Resolve SonarQube project version
+        if: ${{ vars.SONAR_HOST_URL }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          version="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          if [ -z "$version" ]; then
+            version="v$(node -p "require('./package.json').version")"
+            echo "::warning::No tag found; falling back to the package version $version"
+          fi
+          echo "Sonar project version: $version"
+          echo "SONAR_PROJECT_VERSION=$version" >> $GITHUB_ENV
+
+      # v3 on purpose: it is the line the rest of the DevalexLLC projects run against this
+      # SonarQube instance, and the one `SONAR_ROOT_CERT` is known to work with.
+      - name: SonarQube Scan
+        if: ${{ vars.SONAR_HOST_URL }}
+        uses: sonarsource/sonarqube-scan-action@v3
+        with:
+          args: -Dsonar.projectVersion=${{ env.SONAR_PROJECT_VERSION }}
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          SONAR_ROOT_CERT: ${{ secrets.CACERT_PEM }}

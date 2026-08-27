@@ -1,0 +1,30 @@
+{
+  "cSpell.words": [
+    "bfcache",
+    "CSPRNG",
+    "Devalex",
+    "devalexllc",
+    "drainable",
+    "Dsonar",
+    "hotspot",
+    "infralytics",
+    "loadtime",
+    "navigations",
+    "npmjs",
+    "pagehide",
+    "Qube",
+    "sonarlint",
+    "sonarqube",
+    "sonarsource",
+    "tsgolint",
+    "typechecks",
+    "unentitled",
+    "unstub",
+    "visibilitychange",
+    "vitest"
+  ],
+  "sonarlint.connectedMode.project": {
+    "connectionId": "Devalex",
+    "projectKey": "Devalex:traffic-next"
+  }
+}
