@@ -72,7 +72,7 @@
     "oxlint-tsgolint": "0.23.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "vitest": "4.1.8",
+    "vitest": "4.1.11",
     "zod": "4.0.14"
   },
   "peerDependencies": {
