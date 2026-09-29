@@ -75,6 +75,26 @@ function sent(call = 0): Batch {
   return JSON.parse(init.body as string) as Batch;
 }
 
+/** An event of roughly `kb` kilobytes, all of it in `state`. */
+function heavy(kb: number, title?: string) {
+  return {
+    event: TrafficEvent.OnRouteChanged,
+    title,
+    state: { blob: "x".repeat(kb * 1024) },
+  };
+}
+
+function bytes(body: BodyInit | null | undefined): number {
+  return new TextEncoder().encode(body as string).length;
+}
+
+/** Make the next fetch stay pending until the returned function settles it. */
+function pending() {
+  const { promise, resolve } = Promise.withResolvers<Response>();
+  fetchMock.mockImplementationOnce(async () => promise);
+  return (status = 204) => resolve(reply(status));
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   fetchMock = vi.fn<(input: string, init: RequestInit) => Promise<Response>>(async () => reply());
@@ -432,6 +452,129 @@ describe("TrafficProvider failure handling", () => {
     expect(titles.slice(-10)).toEqual(Array.from({ length: 10 }, (_, i) => `new-${i}`));
     expect(titles).not.toContain("old-0");
     expect(titles).toContain("old-10");
+  });
+});
+
+describe("TrafficProvider batch size", () => {
+  // Browsers refuse a keepalive fetch or beacon past 64 KiB.
+  const LIMIT = 64 * 1024;
+
+  it("splits a queue too large for one request into requests under the limit", async () => {
+    renderProvider({ flushIntervalMs: 1_000 });
+
+    act(() => {
+      for (let i = 0; i < 9; i += 1) track(heavy(8, `e${i}`));
+    });
+    await advance(1_000);
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+    for (const [, init] of fetchMock.mock.calls) expect(bytes(init.body)).toBeLessThan(LIMIT);
+
+    // Every event arrives, once, in order.
+    const titles = fetchMock.mock.calls.flatMap((_, i) => sent(i).events.map((e) => e.title));
+    expect(titles).toEqual(Array.from({ length: 9 }, (_, i) => `e${i}`));
+  });
+
+  it("flushes as soon as the queue holds a request's worth of bytes", () => {
+    renderProvider({ flushIntervalMs: 60_000 });
+
+    // Far short of the 50-event cap, but past the byte budget.
+    act(() => {
+      for (let i = 0; i < 8; i += 1) track(heavy(8));
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("never has two requests in flight, since the browser's quota is shared", async () => {
+    const finish = pending();
+    renderProvider({ flushIntervalMs: 1_000 });
+
+    act(() => {
+      for (let i = 0; i < 9; i += 1) track(heavy(8));
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // More events and more timer ticks while the first is outstanding.
+    act(() => track({ event: TrafficEvent.OnLogout }));
+    await advance(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Once it settles, the rest follows.
+    await act(async () => finish());
+    await advance(0);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("carries on with the rest of the queue after a rejected batch", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    fetchMock.mockResolvedValueOnce(reply(400));
+    renderProvider({ flushIntervalMs: 1_000 });
+
+    act(() => {
+      for (let i = 0; i < 9; i += 1) track(heavy(8, `e${i}`));
+    });
+    await advance(1_000);
+
+    // The rejected batch is gone; the events after it were not in it.
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+    expect(sent(fetchMock.mock.calls.length - 1).events.at(-1)?.title).toBe("e8");
+  });
+
+  it("drops an event too large for any request, and keeps the rest", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    renderProvider();
+
+    act(() => {
+      track({ event: TrafficEvent.OnLogin });
+      track(heavy(70));
+      track({ event: TrafficEvent.OnLogout });
+    });
+    await advance(5_000);
+
+    expect(warn).toHaveBeenCalledWith("traffic: event too large to send, dropped");
+    expect(sent().events.map((e) => e.event)).toEqual([
+      TrafficEvent.OnLogin,
+      TrafficEvent.OnLogout,
+    ]);
+  });
+
+  it("drains a large queue as several beacons, each under the limit", () => {
+    // A queue only outgrows one request while a fetch is outstanding; the byte
+    // threshold flushes it otherwise. That is also the realistic unload case.
+    pending();
+    renderProvider({ flushIntervalMs: 60_000 });
+
+    act(() => {
+      for (let i = 0; i < 16; i += 1) track(heavy(8));
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    expect(beaconMock.mock.calls.length).toBeGreaterThan(1);
+    for (const [, blob] of beaconMock.mock.calls) expect(blob.size).toBeLessThan(LIMIT);
+  });
+
+  it("keeps what the browser refuses to beacon and sends it once the tab is back", async () => {
+    beaconMock.mockReturnValueOnce(true).mockReturnValue(false);
+    const finish = pending();
+    renderProvider({ flushIntervalMs: 1_000 });
+
+    act(() => {
+      for (let i = 0; i < 16; i += 1) track(heavy(8, `e${i}`));
+    });
+    setVisibility("hidden");
+    expect(beaconMock).toHaveBeenCalledTimes(2);
+
+    // Not an unload after all: once the outstanding fetch settles, the ordinary
+    // path picks up what the refused beacon left behind.
+    await act(async () => finish());
+    await advance(1_000);
+
+    const fetched = fetchMock.mock.calls.flatMap((_, i) => sent(i).events.map((e) => e.title));
+    expect(fetched.at(-1)).toBe("e15");
   });
 });
 
