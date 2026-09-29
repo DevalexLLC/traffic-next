@@ -539,6 +539,44 @@ describe("TrafficProvider batch size", () => {
     ]);
   });
 
+  it("drops an event it cannot serialize instead of throwing at the caller", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    renderProvider();
+
+    act(() => {
+      track({ event: TrafficEvent.OnLogin });
+      expect(() => track({ event: TrafficEvent.OnRouteChanged, state: { id: 1n } })).not.toThrow();
+      expect(() => track({ event: TrafficEvent.OnRouteChanged, state: { cycle } })).not.toThrow();
+      track({ event: TrafficEvent.OnLogout });
+    });
+    await advance(5_000);
+
+    expect(warn).toHaveBeenCalledWith("traffic: event cannot be serialized, dropped");
+    expect(sent().events.map((e) => e.event)).toEqual([
+      TrafficEvent.OnLogin,
+      TrafficEvent.OnLogout,
+    ]);
+  });
+
+  it("sends each event as it was when tracked, not as the caller later mutated it", async () => {
+    renderProvider({ flushIntervalMs: 1_000 });
+    const nested = Array.from({ length: 7 }, () => ({ blob: "x".repeat(8 * 1024) }));
+
+    act(() => {
+      for (const value of nested)
+        track({ event: TrafficEvent.OnRouteChanged, state: { nested: value } });
+    });
+    // `state` is copied shallowly, so what sits below it is still the caller's;
+    // growing it must not grow the request past the size it was measured at.
+    for (const value of nested) value.blob += "y".repeat(2 * 1024);
+    await advance(1_000);
+
+    for (const [, init] of fetchMock.mock.calls) expect(bytes(init.body)).toBeLessThan(LIMIT);
+    expect(sent().events[0]?.state).toEqual({ nested: { blob: "x".repeat(8 * 1024) } });
+  });
+
   it("drains a large queue as several beacons, each under the limit", () => {
     // A queue only outgrows one request while a fetch is outstanding; the byte
     // threshold flushes it otherwise. That is also the realistic unload case.

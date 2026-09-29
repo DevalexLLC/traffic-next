@@ -51,13 +51,18 @@ const BACKOFF_CAP_MS = 300_000;
 
 const encoder = new TextEncoder();
 
-function byteLength(value: unknown): number {
-  return encoder.encode(JSON.stringify(value)).length;
+function byteLength(json: string): number {
+  return encoder.encode(json).length;
 }
 
-/** An event with its serialized size, measured once at enqueue. */
+/**
+ * An event serialized once, at enqueue, with its size. The request is built from
+ * `json` itself rather than the event object, whose `state` the caller still
+ * holds references into: a nested value mutated before the flush would
+ * otherwise go out larger than it was measured.
+ */
 interface Queued {
-  event: TrafficEventInput;
+  json: string;
   bytes: number;
 }
 
@@ -97,11 +102,15 @@ export function TrafficProvider({
     }, delayMs);
   }, []);
 
-  /** Size of the `{ sessionId, events: [] }` envelope a batch is sent in. */
-  const envelopeBytes = useCallback(
-    () => byteLength({ sessionId: sessionId.current, events: [] }),
+  /** `{ sessionId, events }`, spliced together from the pre-serialized events. */
+  const serialize = useCallback(
+    (batch: Queued[]) =>
+      `{"sessionId":${JSON.stringify(sessionId.current)},"events":[${batch.map(({ json }) => json).join(",")}]}`,
     [],
   );
+
+  /** Size of the envelope a batch is sent in, with no events in it. */
+  const envelopeBytes = useCallback(() => byteLength(serialize([])), [serialize]);
 
   /**
    * Take the longest run from the front of the queue that fits one request:
@@ -124,12 +133,6 @@ export function TrafficProvider({
     return queue.current.splice(0, count);
   }, [envelopeBytes]);
 
-  const serialize = useCallback(
-    (batch: Queued[]) =>
-      JSON.stringify({ sessionId: sessionId.current, events: batch.map(({ event }) => event) }),
-    [],
-  );
-
   const flush = useCallback(
     (useBeacon = false) => {
       if (queue.current.length === 0) return;
@@ -142,7 +145,9 @@ export function TrafficProvider({
       if (useBeacon && typeof navigator.sendBeacon === "function") {
         while (queue.current.length > 0) {
           const batch = takeBatch();
-          const blob = new Blob([serialize(batch)], { type: "application/json" });
+          const blob = new Blob([serialize(batch)], {
+            type: "application/json",
+          });
           if (!navigator.sendBeacon(endpoint, blob)) {
             queue.current = [...batch, ...queue.current];
             return;
@@ -219,7 +224,17 @@ export function TrafficProvider({
         browser: navigator.userAgent.slice(0, 128),
         state: { ...staticState, ...draft.state },
       };
-      const bytes = byteLength(event);
+
+      // `state` takes any value, and a BigInt or a cycle makes `stringify`
+      // throw. That must not reach the caller; the event is lost either way.
+      let json: string;
+      try {
+        json = JSON.stringify(event);
+      } catch {
+        console.warn("traffic: event cannot be serialized, dropped");
+        return;
+      }
+      const bytes = byteLength(json);
 
       // No request could ever carry it, and queueing it would stall everything
       // behind it. The schema bounds most fields but not `state` values.
@@ -228,7 +243,7 @@ export function TrafficProvider({
         return;
       }
 
-      queue.current.push({ event, bytes });
+      queue.current.push({ json, bytes });
       // Bounded even while a request is in flight: newest events matter most.
       if (queue.current.length > MAX_QUEUE) queue.current.shift();
 
