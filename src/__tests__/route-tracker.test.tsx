@@ -2,7 +2,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RouteTracker } from "../client/route-tracker.js";
-import { TrafficEvent } from "../models.js";
+import { TrafficEvent, trafficEventSchema } from "../models.js";
 
 // `next/navigation`'s hooks need a Next router context that does not exist under
 // vitest, so they are mocked and driven directly. `useTraffic` is left real: it
@@ -97,11 +97,53 @@ describe("RouteTracker", () => {
     expect(event(1)).toMatchObject({ event: TrafficEvent.OnRouteChanged });
   });
 
-  it("spreads the caller's extracted filters onto the event", () => {
+  it("nests the caller's extracted filters under `filters`", () => {
     searchParams = new URLSearchParams("site=A&site=B&enclave=prod");
     render(<RouteTracker extractFilters={extractFilters} />);
 
-    expect(event()).toMatchObject({ site: ["A", "B"], enclave: "prod" });
+    expect(event()).toMatchObject({ filters: { site: ["A", "B"], enclave: "prod" } });
+    // Not at the top level, where the wire schema would strip them.
+    expect(event()).not.toHaveProperty("site");
+  });
+
+  it("produces an event the wire schema accepts with its filters intact", () => {
+    searchParams = new URLSearchParams("site=A&site=B&enclave=prod");
+    render(<RouteTracker extractFilters={extractFilters} />);
+
+    // `date` and `uri` are the provider's to fill in; everything else is ours.
+    const parsed = trafficEventSchema.parse({
+      ...event(),
+      date: new Date().toISOString(),
+      uri: "reports/usage",
+    });
+
+    expect(parsed.filters).toEqual({ site: ["A", "B"], enclave: "prod" });
+  });
+
+  it("cannot let a dimension overwrite a field of the event", () => {
+    const { rerender } = render(
+      <RouteTracker extractFilters={() => ({ event: "OnMadeUp", state: "x", title: "y" })} />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    pathname = "/reports/detail";
+    rerender(
+      <RouteTracker extractFilters={() => ({ event: "OnMadeUp", state: "x", title: "y" })} />,
+    );
+
+    expect(event(1)).toMatchObject({
+      event: TrafficEvent.OnRouteChanged,
+      state: { from: "/reports/usage", timeOnPage_ms: 5_000 },
+      filters: { event: "OnMadeUp", state: "x", title: "y" },
+    });
+    expect(event(1).title).toBeUndefined();
+  });
+
+  it("omits `filters` when the caller extracts an empty bag", () => {
+    render(<RouteTracker extractFilters={() => ({})} />);
+
+    expect(event()).not.toHaveProperty("filters");
   });
 
   it("records no filter context when the caller extracts none", () => {
