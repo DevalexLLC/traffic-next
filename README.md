@@ -108,6 +108,13 @@ with exponential backoff and jitter; `400`/`401`/`403` drop instead of retrying,
 since none of them get better by resending. `pagehide` and `visibilitychange`
 drain the queue through `sendBeacon`.
 
+A batch is capped at 50 events **and** 60 KiB serialized. Browsers refuse a
+`keepalive` fetch or a beacon past 64 KiB, and that limit covers every such
+request in flight together, so a larger queue goes out as consecutive requests,
+one at a time. A single event too large to fit a request on its own (the schema
+does not bound `state` values) is dropped with a `console.warn` rather than
+stalling the queue behind it.
+
 ## Development
 
 ```bash
