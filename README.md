@@ -58,6 +58,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 ```
 
+`extractFilters` returns a flat map of dimensions; `RouteTracker` sends it as the
+event's `filters`, which reaches your `forward` as `payload.filters`. Return `{}`
+(or omit the prop) to record none.
+
 `useTraffic()` gives you `track()` for custom events anywhere below the provider.
 It returns a no-op when no provider is mounted, so tests and stories need no
 setup and a missing provider can never crash a page.

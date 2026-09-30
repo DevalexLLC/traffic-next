@@ -21,9 +21,10 @@ import { useTraffic } from "./traffic-provider.js";
 
 export interface RouteTrackerProps {
   /**
-   * Map the current search params onto the API's `*_filter` columns. Each app
-   * decides — Illumina reads `site`, `enclave`, etc. from `searchParams`;
-   * impulse's are different. Return `{}` to record no filter context.
+   * Pull the filter dimensions worth recording out of the current search
+   * params — whatever the app's pages filter on. They are sent as the event's
+   * `filters`, a generic bag your `forward` maps onto its sink's schema.
+   * Return `{}` to record no filter context.
    */
   extractFilters?: (params: URLSearchParams) => Record<string, string[] | string>;
   /** Page title for the event, if the app tracks one. */
@@ -40,6 +41,10 @@ export function RouteTracker({ extractFilters, title }: RouteTrackerProps) {
 
   useEffect(() => {
     const filters = extractFilters?.(searchParams) ?? {};
+    // Nested, never spread: the wire schema reads dimensions from `filters`
+    // and strips unknown top-level keys, and a spread dimension named `event`,
+    // `state`, `uri`… would overwrite that field of the event itself.
+    const context = Object.keys(filters).length > 0 ? { filters } : {};
     const now = Date.now();
 
     if (isFirst.current) {
@@ -54,7 +59,7 @@ export function RouteTracker({ extractFilters, title }: RouteTrackerProps) {
         event: TrafficEvent.OnApplicationLoad,
         title,
         loadtime_ms: nav ? Math.round(nav.duration) : undefined,
-        ...filters,
+        ...context,
       });
     } else {
       track({
@@ -64,7 +69,7 @@ export function RouteTracker({ extractFilters, title }: RouteTrackerProps) {
           from: previous.current?.uri,
           timeOnPage_ms: previous.current ? now - previous.current.enteredAt : undefined,
         },
-        ...filters,
+        ...context,
       });
     }
 
