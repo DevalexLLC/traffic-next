@@ -75,6 +75,8 @@ export function TrafficProvider({
   const queue = useRef<Queued[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retries = useRef(0);
+  // Monotonic deadline: system-clock changes must not extend a retry delay.
+  const retryAt = useRef(0);
   // At most one `keepalive` fetch at a time, for the quota reason given on
   // MAX_BATCH_BYTES: two batches that each fit can still fail together.
   const inFlight = useRef(false);
@@ -153,11 +155,21 @@ export function TrafficProvider({
             return;
           }
         }
+        retryAt.current = 0;
         return;
       }
 
       // The response handler picks the queue back up; see `inFlight`.
       if (inFlight.current) return;
+
+      // New events must neither bypass nor postpone the scheduled retry.
+      // Unload still gets its final attempt, including the fetch fallback.
+      const retryDelay = retryAt.current - performance.now();
+      if (!useBeacon && retryDelay > 0) {
+        schedule(retryDelay);
+        return;
+      }
+      retryAt.current = 0;
 
       const batch = takeBatch();
       inFlight.current = true;
@@ -178,7 +190,12 @@ export function TrafficProvider({
           }
           // 401/403 mean the session is gone or un-entitled. Retrying cannot fix
           // that and would hammer the auth path on every event; drop instead.
-          if (response.status === 401 || response.status === 403) return;
+          if (response.status === 401 || response.status === 403) {
+            // Only this batch was rejected; newer events may have used up
+            // their timer while waiting for this request to finish.
+            sendRest();
+            return;
+          }
           // 400 means we built something the schema rejects — a bug on this
           // side. Retrying sends the same bad payload forever. Drop and log,
           // but carry on with the rest: they were not in this batch.
@@ -204,7 +221,9 @@ export function TrafficProvider({
         // Newest events matter most; drop the oldest on overflow.
         queue.current = [...failed, ...queue.current].slice(-MAX_QUEUE);
         retries.current += 1;
-        schedule(backoff(retries.current));
+        const delay = backoff(retries.current);
+        retryAt.current = performance.now() + delay;
+        schedule(delay);
       }
     },
     [endpoint, schedule, serialize, takeBatch],
@@ -249,7 +268,10 @@ export function TrafficProvider({
 
       const queuedBytes = queue.current.reduce((total, queued) => total + queued.bytes, 0);
       if (queue.current.length >= MAX_QUEUE || queuedBytes >= MAX_BATCH_BYTES) flush();
-      else schedule(retries.current > 0 ? backoff(retries.current) : flushIntervalMs);
+      else
+        schedule(
+          retryAt.current > 0 ? Math.max(0, retryAt.current - performance.now()) : flushIntervalMs,
+        );
     },
     [envelopeBytes, flush, flushIntervalMs, schedule, staticState],
   );

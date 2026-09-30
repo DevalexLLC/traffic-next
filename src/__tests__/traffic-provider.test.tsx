@@ -368,6 +368,95 @@ describe("TrafficProvider failure handling", () => {
     expect(fetchMock).toHaveBeenCalledTimes(7);
   });
 
+  it.each(["bytes", "events"])(
+    "respects backoff when the queue reaches its %s limit",
+    async (limit) => {
+      fetchMock.mockResolvedValue(reply(503));
+      renderProvider({ flushIntervalMs: 1_000 });
+
+      act(() => {
+        for (let i = 0; i < (limit === "bytes" ? 8 : 50); i += 1)
+          track(limit === "bytes" ? heavy(8) : { event: TrafficEvent.OnRouteChanged });
+      });
+      await advance(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await advance(1_000);
+      act(() => track({ event: TrafficEvent.OnLogin }));
+      await advance(3_999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await advance(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps the retry deadline when new events arrive below the batch limits", async () => {
+    fetchMock.mockResolvedValueOnce(reply(503));
+    renderProvider({ flushIntervalMs: 1_000 });
+    act(() => track({ event: TrafficEvent.OnLogin }));
+    await advance(1_000);
+
+    await advance(1_000);
+    act(() => track({ event: TrafficEvent.OnLogout }));
+    await advance(3_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sent(1).events.map((event) => event.event)).toEqual([
+      TrafficEvent.OnLogin,
+      TrafficEvent.OnLogout,
+    ]);
+  });
+
+  it("keeps the retry delay when the system clock moves backwards", async () => {
+    fetchMock.mockResolvedValueOnce(reply(503));
+    renderProvider({ flushIntervalMs: 1_000 });
+    act(() => track({ event: TrafficEvent.OnLogin }));
+    await advance(1_000);
+
+    vi.setSystemTime(Date.now() - 60 * 60 * 1_000);
+    await advance(4_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the normal flush interval after a beacon drains a pending retry", async () => {
+    fetchMock.mockResolvedValueOnce(reply(503));
+    renderProvider({ flushIntervalMs: 1_000 });
+    act(() => track({ event: TrafficEvent.OnLogin }));
+    await advance(1_000);
+    setVisibility("hidden");
+    expect(beaconMock).toHaveBeenCalledTimes(1);
+    await advance(5_000);
+
+    setVisibility("visible");
+    act(() => track({ event: TrafficEvent.OnLogout }));
+    await advance(999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sent(1).events.map((event) => event.event)).toEqual([TrafficEvent.OnLogout]);
+  });
+
+  it.each([true, false])(
+    "drains during backoff on unload (beacon available: %s)",
+    async (hasBeacon) => {
+      if (!hasBeacon)
+        Object.defineProperty(navigator, "sendBeacon", { value: undefined, configurable: true });
+      fetchMock.mockResolvedValueOnce(reply(503));
+      renderProvider({ flushIntervalMs: 1_000 });
+      act(() => track({ event: TrafficEvent.OnLogout }));
+      await advance(1_000);
+
+      act(() => {
+        window.dispatchEvent(new Event("pagehide"));
+      });
+      expect(beaconMock).toHaveBeenCalledTimes(hasBeacon ? 1 : 0);
+      expect(fetchMock).toHaveBeenCalledTimes(hasBeacon ? 1 : 2);
+    },
+  );
+
   it.each([
     { bound: "floor", draw: 0 },
     { bound: "ceiling", draw: 0xff_ff_ff_ff },
@@ -416,6 +505,28 @@ describe("TrafficProvider failure handling", () => {
     // Retrying a dead session would hammer the auth path on every event.
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it.each([401, 403])(
+    "sends newer events after a slow %i without retrying the rejected batch",
+    async (status) => {
+      const finish = pending();
+      renderProvider({ flushIntervalMs: 1_000 });
+      act(() => track({ event: TrafficEvent.OnApplicationLoad }));
+      await advance(1_000);
+
+      act(() => track({ event: TrafficEvent.OnLogin }));
+      // This timer fires while the first request is still in flight.
+      await advance(1_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await act(async () => finish(status));
+      await advance(1_000);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(sent(1).events.map((event) => event.event)).toEqual([TrafficEvent.OnLogin]);
+      await advance(300_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("drops and logs a batch the server rejects as malformed", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
