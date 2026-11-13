@@ -25,7 +25,7 @@ jobs:
         # native TS type-stripping landed, which oxfmt.config.ts and
         # oxlint.config.ts need in order to load at all. The upper entry
         # tracks release.yml, which needs 24.20 for npm 11.19's OIDC support.
-        node: [22.18.0, 24.20.0]
+        node: [22.18.0, 24.22.2]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           # Tracks the upper matrix entry; nothing here needs the 22.18 floor.
-          node-version: 24.20.0
+          node-version: 24.22.2
           cache: npm
       - run: npm ci
       - run: npm run test:coverage
