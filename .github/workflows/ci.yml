@@ -93,8 +93,12 @@ jobs:
 
       # v3 on purpose: it is the line the rest of the DevalexLLC projects run against this
       # SonarQube instance, and the one `SONAR_ROOT_CERT` is known to work with.
+      # `continue-on-error` does not make the scan optional: the next step decides whether a
+      # failure here fails the run.
       - name: SonarQube Scan
+        id: sonar-scan
         if: ${{ vars.SONAR_HOST_URL }}
+        continue-on-error: true
         uses: sonarsource/sonarqube-scan-action@v3
         with:
           args: -Dsonar.projectVersion=${{ env.SONAR_PROJECT_VERSION }}
@@ -103,3 +107,35 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
           SONAR_ROOT_CERT: ${{ secrets.CACERT_PEM }}
+
+      # Fail open on an outage, and only on an outage. The instance runs on spot capacity and
+      # disappears without notice (the ingress answers 503), which turned `main` red for commits
+      # that had nothing wrong with them. So when the scan fails, ask the server how it is: if it
+      # does not answer `UP`, the failure is the server's and the run continues with a warning;
+      # if it does, the scanner failed against a healthy server (bad token, bad config, a
+      # scanner error) and the run fails as before. One probe, no retries, on purpose: the
+      # question is what state the server was in when the scan failed, and waiting for it to
+      # come back would turn an outage into a failure. The cost of a skipped scan is small,
+      # because every analysis is a full snapshot of `main` and the next push catches up.
+      # Probing only after a failure also means a probe that wrongly reports an outage (a
+      # missing CA, a proxy) can never skip a scan that would have worked.
+      - name: Fail on SonarQube scan errors unless the server is down
+        if: ${{ steps.sonar-scan.outcome == 'failure' }}
+        env:
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          CACERT_PEM: ${{ secrets.CACERT_PEM }}
+        run: |
+          body="$(mktemp)"
+          curl_opts=(--silent --show-error --max-time 15 --output "$body" --write-out '%{http_code}')
+          if [ -n "$CACERT_PEM" ]; then
+            printf '%s\n' "$CACERT_PEM" > "${RUNNER_TEMP:-/tmp}/sonar-cacert.pem"
+            curl_opts+=(--cacert "${RUNNER_TEMP:-/tmp}/sonar-cacert.pem")
+          fi
+          # A connection failure leaves curl's `000` in `http_code`; `|| true` keeps `-e` from
+          # ending the step before the verdict below.
+          http_code="$(curl "${curl_opts[@]}" "${SONAR_HOST_URL%/}/api/system/status" || true)"
+          if [ "$http_code" = "200" ] && grep -Eq '"status"[[:space:]]*:[[:space:]]*"UP"' "$body"; then
+            echo "::error title=SonarQube scan failed::SonarQube is up, so this is not an outage. See the SonarQube Scan step log."
+            exit 1
+          fi
+          echo "::warning title=SonarQube analysis skipped::SonarQube did not report UP (HTTP $http_code from /api/system/status), so the failed scan is treated as an outage. This commit was not analyzed; the next push to main will be."
